@@ -1,17 +1,6 @@
 //! Types and traits for decoding values from the database.
 use serde::de::DeserializeOwned;
-
-use crate::database::Database;
-use crate::value::HasRawValue;
-
-/// A type that can be decoded from the database.
-pub trait Decode<'de, DB>
-    where
-        Self: Sized + 'de,
-        DB: Database,
-{
-    fn decode(value: <DB as HasRawValue<'de>>::RawValue) -> crate::Result<Self>;
-}
+use crate::Error;
 
 /// decode json vec to an object
 /// support decode types:
@@ -44,7 +33,7 @@ pub fn json_decode<T: ?Sized>(datas: Vec<serde_json::Value>) -> Result<T, crate:
             "alloc::string::String" => {
                 //decode struct
                 if datas.len() > 1 {
-                    return Result::Err(decode_err!("[rbatis] rows.affected_rows > 1,but decode one result({})!", type_name));
+                    return Result::Err(Error::from(format!("[rbatis] rows.affected_rows > 1,but decode one result({})!", type_name)));
                 }
                 for item in datas {
                     match item {
@@ -73,7 +62,7 @@ pub fn json_decode<T: ?Sized>(datas: Vec<serde_json::Value>) -> Result<T, crate:
             _ => {
                 //decode struct
                 if datas.len() > 1 {
-                    return Result::Err(decode_err!("[rbatis] rows.affected_rows > 1,but decode one result({})!", type_name));
+                    return Result::Err(Error::from(format!("[rbatis] rows.affected_rows > 1,but decode one result({})!", type_name)));
                 }
                 //decode single object
                 for x in datas {
@@ -88,7 +77,7 @@ pub fn json_decode<T: ?Sized>(datas: Vec<serde_json::Value>) -> Result<T, crate:
         return Result::Ok(decode_result.unwrap());
     } else {
         let e = decode_result.err().unwrap().to_string();
-        return Result::Err(decode_err!("[rbatis] json decode: {}, fail:{}" ,type_name, e));
+        return Result::Err(Error::from(format!("[rbatis] json decode: {}, fail:{}" ,type_name, e)));
     }
 }
 

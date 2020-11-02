@@ -3,22 +3,22 @@ use serde_json::Value;
 use rbatis_core::convert::StmtConvert;
 use rbatis_core::db::DriverType;
 
-use crate::sql::Date;
+use crate::crud::ColumnFormat;
 
-impl Date for DriverType {
-    fn date_convert(&self, value: &Value, index: usize) -> rbatis_core::Result<(String, Value)> {
-        let mut sql = String::new();
-        match self {
-            DriverType::Postgres => {
-                sql = format!("cast({} as timestamp)", self.stmt_convert(index).as_str());
-            }
-            _ => {
-                sql = self.stmt_convert(index);
-            }
+#[derive(Copy, Clone, Debug)]
+pub struct DateFormat {}
+
+impl ColumnFormat for DateFormat {
+    fn format(&self, driver_type: &DriverType, column: &str, value_sql: &mut String, value: &serde_json::Value) -> rbatis_core::Result<()> {
+        if driver_type.eq(&DriverType::Postgres)
+            && !value.is_null()
+            && (column.ends_with("date") || column.ends_with("time") || column.ends_with("Date") || column.ends_with("Time")) {
+            *value_sql = format!("{}::timestamp", value_sql);
         }
-        return Ok((sql, value.to_owned()));
+        return Ok(());
     }
 }
+
 
 #[test]
 pub fn test_date() {}

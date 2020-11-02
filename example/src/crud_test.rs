@@ -1,7 +1,6 @@
 ///test CRUD
 #[cfg(test)]
 mod test {
-    use fast_log::log::RuntimeType;
     use serde::Deserialize;
     use serde::Serialize;
 
@@ -10,10 +9,10 @@ mod test {
     use rbatis::plugin::page::{Page, PageRequest};
     use rbatis::rbatis::Rbatis;
     use rbatis_core::Error;
-    use rbatis_core::types::BigDecimal;
-    use rbatis_core::types::chrono::NaiveDateTime;
-    use rbatis_core::value::DateTimeNow;
     use rbatis_macro_driver::sql;
+    use chrono::NaiveDateTime;
+    use bigdecimal_::BigDecimal;
+    use rbatis_core::value::DateTimeNow;
 
     #[derive(CRUDEnable, Serialize, Deserialize, Clone, Debug)]
     pub struct BizActivity {
@@ -37,7 +36,7 @@ mod test {
 // }
 
     pub async fn init_rbatis() -> Rbatis {
-        fast_log::log::init_log("requests.log", &RuntimeType::Std);
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
         let rb = Rbatis::new();
         rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
 
@@ -207,7 +206,8 @@ mod test {
         rb.logic_plugin = Some(Box::new(RbatisLogicDeletePlugin::new("delete_flag")));
 
         let w = rb.new_wrapper()
-            .eq("delete_flag", 1)
+            .like("name", "test")
+            //.order_by(false, &["create_time"])
             .check().unwrap();
         let r: Page<BizActivity> = rb.fetch_page_by_wrapper("", &w, &PageRequest::new(1, 20)).await.unwrap();
         println!("{}", serde_json::to_string(&r).unwrap());
@@ -234,15 +234,23 @@ mod test {
     #[sql(RB, "select * from biz_activity where id = ?")]
     fn select(name: &str) -> BizActivity {}
 
-
+    /// Use static RB ref
+    /// 使用全局变量例子
     #[py_sql(RB, "select * from biz_activity where id = #{name}
                   if name != '':
                     and name=#{name}")]
     fn py_select(name: &str) -> Option<BizActivity> {}
 
+    /// Use Arg rbatis ref
+    /// 使用参数变量例子
+    #[py_sql(rbatis, "select * from biz_activity where id = #{name}
+                  if name != '':
+                    and name=#{name}")]
+    fn py_select_rb(rbatis: &Rbatis, name: &str) -> Option<BizActivity> {}
+
     #[async_std::test]
     pub async fn test_macro_select() {
-        fast_log::log::init_log("requests.log", &RuntimeType::Std);
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
         RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
         let a = select("1").await.unwrap();
         println!("{:?}", a);
@@ -250,9 +258,78 @@ mod test {
 
     #[async_std::test]
     pub async fn test_macro_py_select() {
-        fast_log::log::init_log("requests.log", &RuntimeType::Std);
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
+        //use static ref
         RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
         let a = py_select("1").await.unwrap();
+        println!("{:?}", a);
+        // use arg value
+        let rbatis = Rbatis::new();
+        rbatis.link("mysql://root:123456@localhost:3306/test").await.unwrap();
+        let a = py_select_rb(&rbatis, "1").await.unwrap();
+        println!("{:?}", a);
+    }
+
+
+    /// join method,you can use
+    /// JOIN:
+    /// LEFT JOIN:
+    /// RIGHT JOIN:
+    /// FULL JOIN:
+    #[py_sql(rbatis, "SELECT a1.name as name,a2.create_time as create_time
+                      FROM test.biz_activity a1,biz_activity a2
+                      WHERE a1.id=a2.id
+                      AND a1.name=#{name}")]
+    fn join_select(rbatis: &Rbatis, name: &str) -> Option<Vec<BizActivity>> {}
+
+    #[async_std::test]
+    pub async fn test_join() {
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
+        RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
+        let results = join_select(&RB, "test").await.unwrap();
+        println!("data: {:?}", results);
+    }
+
+    #[test]
+    pub fn test_raw_identifiers() {
+        #[derive(CRUDEnable, Serialize, Deserialize, Clone, Debug)]
+        pub struct BizActivity {
+            pub id: Option<String>,
+            // pub type: Option<String>, // type is a keyword, so need to named `r#type`.
+            pub r#type: Option<String>,
+        }
+
+        assert_eq!("id,type".to_string(), BizActivity::table_columns());
+    }
+
+    /// Use py_select_page
+   /// 使用分页宏例子
+    #[py_sql(RB, "select * from biz_activity where delete_flag = 0
+                  if name != '':
+                    and name=#{name}")]
+    fn py_select_page(page_req: &PageRequest, name: &str) -> Page<BizActivity> {}
+
+    #[async_std::test]
+    pub async fn test_macro_py_select_page() {
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
+        //use static ref
+        RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
+        let a = py_select_page(&PageRequest::new(1, 10), "test").await.unwrap();
+        println!("{:?}", a);
+    }
+
+
+    /// Use sql_select_page
+   /// 使用分页宏例子
+    #[sql(RB, "select * from biz_activity where delete_flag = 0 and name = ?")]
+    fn sql_select_page(page_req: &PageRequest, name: &str) -> Page<BizActivity> {}
+
+    #[async_std::test]
+    pub async fn test_macro_sql_select_page() {
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
+        //use static ref
+        RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
+        let a = sql_select_page(&PageRequest::new(1, 10), "test").await.unwrap();
         println!("{:?}", a);
     }
 }

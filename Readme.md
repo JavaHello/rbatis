@@ -1,69 +1,74 @@
 
-#### A ORM formwork Rustlang-based,dynamic sql, no Runtime,No Garbage Collector, low Memory use,High Performance orm Framework. support async_std,tokio
-#### This crate uses #![forbid(unsafe_code)] to ensure everything is implemented in 100% Safe Rust.
-#### rbatis 是一个无GC无虚拟机无运行时Runtime直接编译为机器码,并发安全的  数据库 ORM框架，并且所有数据传值均使用json（serde_json）使用百分之百的安全代码实现
+* [Website-English](https://rbatis.github.io/rbatis.io/#/README_EN)
+
+* [官网/文档](https://rbatis.github.io/rbatis.io/)
+
+
+#### A highly performant ORM framework written in Rust, inspired by Mybatis and MybatisPlus. 
+#### Dynamic SQL, no runtime, no Garbage Collector, and low memory use. 
+#### Supports async_std, tokio
+#### This crate uses #![forbid(unsafe_code)] to ensure everything is implemented in 100% safe Rust.
+#### fast more than golang 30%! 
 
 [![Build Status](https://travis-ci.org/zhuxiujia/rbatis.svg?branch=master)](https://travis-ci.org/zhuxiujia/rbatis)
 
 ![Image text](logo.png)
 
-
-##### way not diesel,way not sqlx ? 为什么不选择diesel,sqlx之类的框架?
-| 框架    | 协程异步async高并发 | 使用难度 | 同时支持Xml/Wrapper/内置增删改查 | logic del逻辑删除插件| page分页插件
+##### Why not diesel or not sqlx ? 
+| Framework    | Async/.await | Learning curve | Supports for xml/Wrapper/built-in CRUD | Logical delete plugin| Pagination plugin
 | ------ | ------ |------ |------ |------ |------ |
-| rbatis | √     | 非常简单   |   √     |    √     |   √     |  
-| sqlx   | √     | 难（强依赖宏和 莫名其妙的环境变量）       |   x     |   x     |   x     |  
-| diesel | x     | 简单（缺xml支持） |   x     |  x     |  x     |  
+| rbatis | √     | easy   |   √     |    √     |   √     |  
+| sqlx   | √     | hard (depends on macros and env. variables) |   x     |   x     |   x     |  
+| diesel | x     | hard (use FFI, unsafe) |   x     |  x     |  x     |  
 
-
-##### 和Go语言对比性能(环境（docker）仅供参考)
-| 框架     | Mysql（docker） | SQL语句（1万次） | 纳秒/每操作（低越好） | Qps(高越好) |内存消耗（低越好） |
+##### Performance comparison with Golang (in a docker environment)
+| Framework     | Mysql（docker） | SQL statement（10k） | ns/operation（lower is better） | Qps(higher is better) |Memory usage(lower is better） |
 |  ------ | ------ |------ |------ |------ |------ |
-| Rust语言-rbatis/tokio  |  1CPU,1G内存    | select count(1) from table;    | 965649 ns/op   |  1035 Qps/s  |  2.1MB   |      
-| Go语言-GoMybatis/http   |  1CPU,1G内存   | select count(1) from table;   | 1184503 ns/op  |  844  Qps/s   |  28.4MB  |     
+| Rust-rbatis/tokio  |  1 CPU, 1G memory    | select count(1) from table;    | 965649 ns/op   |  1035 Qps/s  |  2.1MB   |      
+| Go-GoMybatis/http   |  1 CPU, 1G memory   | select count(1) from table;   | 1184503 ns/op  |  844  Qps/s   |  28.4MB  |     
 
+* If necessary, you can use the same XML file data as Mybatis，Easy project migration from java to Rust
+* used json with serde_json for passing parameters and communication
+* high performance, single threaded benchmark can easily achieve 200,000 QPS - data returned from database directly (zero lookup time) on a Windows 10 6 core i7 with 16 GB memory machine. Performace will be better using multiple threads, and it outperforms Go's GoMyBatis.
+* supports logical deletes, pagination, py-like SQL and basic Mybatis functionalities.
+* supports future,(in theory, if all io operations are replaced with async_std/tokio, it could achieve higher concurrency than Go-lang)
+* supports logging, customizable logging based on `log` crate
+* used 100% safe Rust with `#![forbid(unsafe_code)]` enabled
+* [rbatis/example (import into Clion!)](https://github.com/rbatis/rbatis/tree/master/example/src)
+* [website back end example(import into Clion!)](https://github.com/rbatis/abs_admin)
 
-* 使用最通用的json数据结构（基于serde_json）进行传参和通讯
-* 高性能，单线程benchmark 可轻松拉起200000 QPS/s（直接返回数据（数据库查询时间损耗0），win10,6 core i7,16GB）  多线程更高 远超go语言版本的GoMyBatis
-* 多功能，逻辑删除插件+分页插件+Py风格Sql+基本的Mybatis功能
-* 支持future,async await（理论上，假设严格按照async_std/tokio库替代所有io操作，那么并发量可远远超过go语言）
-* 日志支持,可自定义具体日志（基于标准库log(独立于任何特定的日志记录库)，日志可选任意第三方库实现）
-* 使用百分百的安全代码实现(lib.rs加入了"#![forbid(unsafe_code)]" 禁止不安全的unsafe代码)
-* [示例代码（需要Clion导入）](https://github.com/rbatis/rbatis/tree/master/example/src)
-* [示例项目（需要Clion导入）](https://github.com/rbatis/abs_admin)
+##### Example Rust backend service https://github.com/rbatis/abs_admin
 
-##### 实战(编写Rust后台服务) https://github.com/rbatis/abs_admin
-
-##### 使用方法：添加依赖(Cargo.toml)
+##### Example Cargo.toml
 ``` rust
 # add this library,and cargo install
 
-#json支持(必须)
+# json (required)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
-#日期支持(必须)
+# Date time (required)
 chrono = { version = "0.4", features = ["serde"] }
 
-#log日志支持(必须)
+# logging (required)
 log = "0.4"
-fast_log="1.2.2"
+fast_log="1.3"
 
-#BigDecimal支持(可选)
+# BigDecimal (optional)
 bigdecimal = "0.2"
 
-#rbatis支持，版本保持一致(必须)
-rbatis-core = { version = "1.5.8", features = ["all"]}
-rbatis =  { version = "1.5.8" } 
-rbatis-macro-driver = { version = "1.5.8" }
+# rbatis, must maintain the same versions (required)
+rbatis-core = { version = "1.8.5", features = ["all"]}
+rbatis =  { version = "1.8.5" } 
+rbatis-macro-driver = { version = "1.8.5" }
 
 ```
 
-##### 一分钟快速学会， QueryWrapper，常用方法(详见example/crud_test.rs)
+##### Quick example: QueryWrapper and common usages (see example/crud_test.rs for details)
 ```rust
 #[macro_use]
 extern crate rbatis_macro_driver;
-///数据库表模型 CRUDEnable也可以写成 impl CRUDEnable for BizActivity{}
+/// may also write `CRUDEnable` as `impl CRUDEnable for BizActivity{}`
 #[derive(CRUDEnable,Serialize, Deserialize, Clone, Debug)]
 pub struct BizActivity {
     pub id: Option<String>,
@@ -80,28 +85,28 @@ pub struct BizActivity {
     pub delete_flag: Option<i32>,
 }
 
-// (可选) 手动实现，不使用上面的derive(CRUDEnable),可重写table_name方法。手动实现能支持IDE智能提示
+// (optional) manually implement instead of using `derive(CRUDEnable)`. This allows manually rewriting `table_name()` function and supports  code completion in IDE.
 //impl CRUDEnable for BizActivity {
 //    type IdType = String;    
 //    fn table_name()->String{
 //        "biz_activity".to_string()
 //    }
-//    fn table_fields()->String{
+//    fn table_columns()->String{
 //        "id,name,delete_flag".to_string()
 //    }
 //}
 
 #[actix_rt::main]
 async fn main() {
-///rbatis初始化，rbatis是线程安全可使用lazy_static 定义为全局变量
+/// initialize rbatis. May use `lazy_static` to define rbatis as a global variable because rbatis is thread safe
 let rb = Rbatis::new();
-///连接数据库   
+/// connect to database  
 rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
-///自定义连接池参数。(可选)
+/// customize connection pool parameters (optional)
 // let mut opt =PoolOptions::new();
 // opt.max_size=100;
 // rb.link_opt("mysql://root:123456@localhost:3306/test",&opt).await.unwrap();
-///新建的wrapper sql逻辑
+/// newly constructed wrapper sql logic
 let wrapper = rb.new_wrapper()
             .eq("id", 1)                    //sql:  id = 1
             .and()                          //sql:  and 
@@ -124,67 +129,67 @@ let activity = BizActivity {
                 version: Some(1),
                 delete_flag: Some(1),
             };
-///保存
+/// saving
 rb.save("",&activity).await;
 //Exec ==> INSERT INTO biz_activity (create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version) VALUES ( ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? )
 
-///批量保存
+/// batch saving
 rb.save_batch("", &vec![activity]).await;
 //Exec ==> INSERT INTO biz_activity (create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version) VALUES ( ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? ),( ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? , ? )
 
-///查询, Option包装，有可能查不到数据则为None
+/// The query, Option wrapper, is None if the data is not found
 let result: Option<BizActivity> = rb.fetch_by_id("", &"1".to_string()).await.unwrap();
 //Query ==> SELECT create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version  FROM biz_activity WHERE delete_flag = 1  AND id =  ? 
 
-///查询-全部
+/// query all
 let result: Vec<BizActivity> = rb.list("").await.unwrap();
 //Query ==> SELECT create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version  FROM biz_activity WHERE delete_flag = 1
 
-///批量-查询id
+///query by id vec
 let result: Vec<BizActivity> = rb.list_by_ids("",&["1".to_string()]).await.unwrap();
 //Query ==> SELECT create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version  FROM biz_activity WHERE delete_flag = 1  AND id IN  (?) 
 
-///自定义查询
+///query by wrapper
 let w = rb.new_wrapper().eq("id", "1").check().unwrap();
 let r: Result<Option<BizActivity>, Error> = rb.fetch_by_wrapper("", &w).await;
 //Query ==> SELECT  create_time,delete_flag,h5_banner_img,h5_link,id,name,pc_banner_img,pc_link,remark,sort,status,version  FROM biz_activity WHERE delete_flag = 1  AND id =  ? 
 
-///删除
+///delete
 rb.remove_by_id::<BizActivity>("", &"1".to_string()).await;
 //Exec ==> UPDATE biz_activity SET delete_flag = 0 WHERE id = 1
 
-///批量删除
+///delete batch
 rb.remove_batch_by_id::<BizActivity>("", &["1".to_string(), "2".to_string()]).await;
 //Exec ==> UPDATE biz_activity SET delete_flag = 0 WHERE id IN (  ?  ,  ?  ) 
 
-///修改
+///update
 let w = rb.new_wrapper().eq("id", "12312").check().unwrap();
 rb.update_by_wrapper("", &activity, &w).await;
 //Exec ==> UPDATE biz_activity SET  create_time =  ? , delete_flag =  ? , status =  ? , version =  ?  WHERE id =  ? 
 }
 
-///...还有更多方法，请查看crud.rs
+///...more usage,see crud.rs
 ```
 
 
-#### 智能宏映射（新功能）
+#### macros (new addition)
 ```rust
     lazy_static! {
      static ref RB:Rbatis=Rbatis::new();
    }
 
-    /// 宏根据方法定义生成执行逻辑，又点类似于 java/mybatis的@select动态sql
-    /// RB是本地依赖Rbatis引用的名称,例如  dao::RB, com::xxx::RB....都可以
-    /// 第二个参数是标准的驱动sql，注意对应数据库参数mysql为？,pg为$1...
-    /// 宏会自动转换函数为  pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
+    /// Macro generates execution logic based on method definition, similar to @select dynamic SQL of Java/Mybatis
+    /// RB is the name referenced locally by Rbatis, for example DAO ::RB, com:: XXX ::RB... Can be
+    /// The second parameter is the standard driver SQL. Note that the corresponding database parameter mysql is? , pg is $1...
+    /// macro auto edit method to  'pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}'
     ///
     #[sql(RB, "select * from biz_activity where id = ?")]
     fn select(name: &str) -> BizActivity {}
-    //其他写法： pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
+    //or： pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
 
     #[async_std::test]
     pub async fn test_macro() {
-        fast_log::log::init_log("requests.log", &RuntimeType::Std);
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
         RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
         let a = select("1").await.unwrap();
         println!("{:?}", a);
@@ -195,20 +200,15 @@ rb.update_by_wrapper("", &activity, &w).await;
      static ref RB:Rbatis=Rbatis::new();
    }
 
-    /// 宏根据方法定义生成执行逻辑，又点类似于 java/mybatis的@select动态sql
-    /// RB是本地依赖Rbatis引用的名称,例如  dao::RB, com::xxx::RB....都可以
-    /// 第二个参数是标准的驱动sql，注意对应数据库参数mysql为？,pg为$1...
-    /// 宏会自动转换函数为  pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
-    ///
     #[py_sql(RB, "select * from biz_activity where id = #{name}
                   if name != '':
                     and name=#{name}")]
     fn py_select(name: &str) -> Option<BizActivity> {}
-    //其他写法： pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
+    //or： pub async fn select(name: &str) -> rbatis_core::Result<BizActivity> {}
 
     #[async_std::test]
     pub async fn test_macro_py_select() {
-        fast_log::log::init_log("requests.log", &RuntimeType::Std);
+        fast_log::init_log("requests.log", 1000,log::Level::Info,true);
         RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
         let a = py_select("1").await.unwrap();
         println!("{:?}", a);
@@ -217,10 +217,10 @@ rb.update_by_wrapper("", &activity, &w).await;
 
 
 
-##### 逻辑删除插件使用(逻辑删除针对Rbatis提供的查询方法和删除方法有效，例如方法 list**(),remove**()，fetch**())
+##### How to use logical deletes plugin (works for fetching or removing functions provided by rbatis，e.g. list**(),remove**()，fetch**())
 ```rust
    let mut rb = init_rbatis().await;
-   //rb.logic_plugin = Some(Box::new(RbatisLogicDeletePlugin::new_opt("delete_flag",1,0)));//自定义已删除/未删除 写法
+   //rb.logic_plugin = Some(Box::new(RbatisLogicDeletePlugin::new_opt("delete_flag",1,0)));//Customize deleted/undeleted writing
    rb.logic_plugin = Some(Box::new(RbatisLogicDeletePlugin::new("delete_flag")));
    rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
            let r = rb.remove_batch_by_id::<BizActivity>("", &["1".to_string(), "2".to_string()]).await;
@@ -230,14 +230,14 @@ rb.update_by_wrapper("", &activity, &w).await;
 ```
 
 
-##### 分页插件使用
+##### How to use pagination plugin
 ```rust
         let mut rb = Rbatis::new();
         rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
         //框架默认RbatisPagePlugin，如果需要自定义的话需要结构体 必须实现impl PagePlugin for Plugin***{}，例如：
         //rb.page_plugin = Box::new(RbatisPagePlugin {});
 
-        let req = PageRequest::new(1, 20);//分页请求，页码，条数
+        let req = PageRequest::new(1, 20);
         let wraper= rb.new_wrapper()
                     .eq("delete_flag",1)
                     .check()
@@ -276,9 +276,9 @@ rb.update_by_wrapper("", &activity, &w).await;
 ```
 
 
-##### py风格sql语法Example
+##### py-like sql example
 ``` python
-//执行到远程mysql 并且获取结果。支持serde_json可序列化的任意类型
+//Execute to remote mysql and get the result. Supports any serializable type of SERde_JSON
         let rb = Rbatis::new();
         rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
             let py = r#"
@@ -296,18 +296,17 @@ rb.update_by_wrapper("", &activity, &w).await;
             println!("{}", data);
 ```
 
-#### 日志系统(这里举例使用fast_log)
+#### logging system with fast_log here as an example
 ``` rust
- //main函数加入
  use log::{error, info, warn};
  fn  main(){
-      fast_log::log::init_log("requests.log", &RuntimeType::Std).unwrap();
+      fast_log::init_log("requests.log", 1000,log::Level::Info,true);
       info!("print data");
  }
 ```
 
 
-#### 自定义连接池大小，超时，活跃连接数等等
+#### Customize connection pool's size, timeout, active number of connections, and etc.
 
 ```rust
 use rbatis_core::db::PoolOptions;
@@ -321,10 +320,10 @@ rb.link_opt("mysql://root:123456@localhost:3306/test", &opt).await.unwrap();
 ```
 
 
-#### XML使用方法
+#### How to use XML
 ``` rust
 /**
-* 数据库表模型
+* table
 */
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Activity {
@@ -344,7 +343,7 @@ pub struct Activity {
 fn main() {
     async_std::task::block_on(
            async move {
-               fast_log::log::init_log("requests.log", &RuntimeType::Std).unwrap();
+               fast_log::init_log("requests.log", 1000,log::Level::Info,true);
                let mut rb = Rbatis::new();
                rb.link("mysql://root:123456@localhost:3306/test").await.unwrap();
                //xml数据建议以 XXMapper.xml 的格式存储管理
@@ -400,7 +399,7 @@ fn main() {
 //[{"id":"221","name":"test","pc_link":"","h5_link":"","pc_banner_img":null,"h5_banner_img":null,"sort":"0","status":0,"remark":"","create_time":"2020-06-17T20:10:23Z","version":0,"delete_flag":1},{"id":"222","name":"test","pc_link":"","h5_link":"","pc_banner_img":null,"h5_banner_img":null,"sort":"0","status":0,"remark":"","create_time":"2020-06-17T20:10:23Z","version":0,"delete_flag":1},{"id":"223","name":"test","pc_link":"","h5_link":"","pc_banner_img":null,"h5_banner_img":null,"sort":"0","status":0,"remark":"","create_time":"2020-06-17T20:10:23Z","version":0,"delete_flag":1},{"id":"178","name":"test_insret","pc_link":"","h5_link":"","pc_banner_img":null,"h5_banner_img":null,"sort":"1","status":1,"remark":"","create_time":"2020-06-17T20:08:13Z","version":0,"delete_flag":1}]
 ```
 
-#### 事务支持
+#### `Async/.await` task support
 ``` rust
    async_std::task::block_on(async {
         let rb = Rbatis::new();
@@ -415,7 +414,7 @@ fn main() {
 
 
 
-### Web框架支持(这里举例actix-web,支持所有基于tokio,async_std的web框架)
+### How to use rbatis with Rust web frameworks (actix-web is used here as an example, but all web frameworks based on tokio or async_std are supported)
 ``` rust
 lazy_static! {
    static ref RB:Rbatis=Rbatis::new();
@@ -429,7 +428,7 @@ async fn index() -> impl Responder {
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
     //日志
-    fast_log::log::init_log("requests.log", &RuntimeType::Std).unwrap();
+    fast_log::init_log("requests.log", 1000,log::Level::Info,true);
     //链接数据库
     RB.link("mysql://root:123456@localhost:3306/test").await.unwrap();
     //http路由
@@ -442,8 +441,8 @@ async fn main() -> std::io::Result<()> {
         .await
 }
 ```
-### 支持数据结构列表
-| 数据库    | 已支持 |
+### Supported data structures
+| data structure    | is supported |
 | ------ | ------ |
 | Option                   | √     | 
 | Vec                      | √     |  
@@ -454,86 +453,66 @@ async fn main() -> std::io::Result<()> {
 | BigDecimal               | √     |
 | serde_json::Value...more serde type         | √     |
 
-### 支持数据库类型√已支持.进行中
-| 数据库    | 已支持 |
+### Supported database √supported .WIP
+| database    | is supported |
 | ------ | ------ |
 | Mysql            | √     |   
 | Postgres         | √     |  
 | Sqlite           | √     |  
-| TiDB             | √     |
-| CockroachDB      | √     |
+| Mssql/Sqlserver            | √     |  
+| MariaDB(Mysql)             | √     |
+| TiDB(Mysql)             | √     |
+| CockroachDB(Postgres)      | √     |
 
-### 平台测试通过
-| 平台    | 已支持 |
+### Supported OS/Platforms
+| platform   | is supported |
 | ------ | ------ |
 | Linux                   | √     | 
 | Apple/MacOS             | √     |  
 | Windows               | √     |
 
 
-### 进度表-按照顺序实现
-| 功能    | 已支持 |
+### Progress - in sequential order
+| function    | is supported |
 | ------ | ------ |
-| CRUD(内置CRUD模板(内置CRUD支持逻辑删除插件))                  | √     |
-| LogSystem(日志组件)                                          | √     | 
-| Tx(事务/事务嵌套/注解声明式事务)                                | √     |   
-| Py(在SQL中使用和xml等价的类python语法)                         | √     | 
-| SlowSqlCount(内置慢查询日志分析)                              | √     | 
-| async/await支持                                             | √     | 
-| PagePlugin(分页插件)                                         | √     |
-| LogicDelPlugin(逻辑删除插件)                                 | √    |
-| DataBaseConvertPlugin(数据库表结构转换为配置插件)               | x     | 
-| web(可视化Web UI)                                            | x     |  
+| CRUD, with built-in CRUD template (built-in CRUD supports logical deletes)                  | √     |
+| LogSystem (logging component)                                          | √     | 
+| Tx(task/Nested transactions)                                | √     |   
+| Py(using py-like xml-equivalent statement in SQL)                         | √     | 
+| async/await support                                             | √     | 
+| PagePlugin(Pagincation)                                         | √     |
+| LogicDelPlugin                                 | √    |
+| DataBaseConvertPlugin(The database table structure is converted to the configuration plug-in)    | x     | 
+| web(Web UI)                                            | x     |  
 
 
-### 基准测试benchmark (测试平台 win10,6 core i7,16GB)
-#### 分步骤压测
-``` 
-//sql构建性能  Example_ActivityMapper.xml -> select_by_condition
-操作/纳秒nano/op: 0.202 s,each:2020 nano/op
-事务数/秒 TPS: 495049.50495049503 TPS/s
+* Conlusion: Assuming zero time consumed on IO, single threaded benchmark achieves 200K QPS or TPS, which is a few times more performant than GC languages like Go or Java.
 
-//查询结果解码性能 decode/mysql_json_decoder  ->  bench_decode_mysql_json
-操作/纳秒nano/op: 0.24 s,each:2400 nano/op
-事务数/秒 TPS: 416666.6666666667 TPS/s
-
-//综合性能约等于
-操作/纳秒nano/op:   4420 nano/op 
-事务数/秒 TPS: 200000  TPS/s
-``` 
-
-* 结论： 假设IO耗时为0的情况下，仅单线程 便有高达20万QPS/TPS，性能也是go语言版、java版 等等有GC暂停语言的 几倍以上性能
-
-
-
-
-### FAQ 常见问题
-* 日期时间和BigDecimal支持？<br/>
-已支持chrono::NaiveDateTime和bigdecimal::BigDecimal
-* async await支持？<br/>
-已同时支持async_std和tokio
-* postgres 的stmt使用$1,$2而不是mysql的?,那么是否需要特殊处理？<br/>
-不需要，因为rbatis 99%的api使用#{}描述参数变量，只需要写具体参数名称，不需要对应数据库的符号。
-* oracle数据库驱动支持？<br/>
-不支持，应该坚持去IOE
-* 直接使用驱动依赖项目里哪个库？<br/>
-应该使用rbatis-core， Cargo.toml 加入 rbatis-core = "*"
-* 如何选择运行时是tokio还是async_std？<br/>
+### FAQ
+* Support for DateTime and BigDecimal? <br/>
+Currently supports chrono::NaiveDateTime和bigdecimal::BigDecimal
+* Supports for `async/.await` <br/>
+Currently supports both `async_std` and `tokio`
+* Stmt in postgres uses $1, $2 instead of ? in Mysql, does this require some special treatment?
+No, because rbatis uses #{} to describe parametric variabls, you only need to write the correct parameter names and do not need to match it with the symbols used by the database.
+* Supports for Oracle database driver? <br/>
+No, moving away from IOE is recommended.
+* Which crate should be depended on if only the driver is needed? <br/>
+rbatis-core， Cargo.toml add rbatis-core = "*"
+* How to select `async/.await` runtime? <br/>
 ```rust
-# Cargo.toml 加入 
-rbatis-core = { features = ["runtime-async-std","all-type"]}
-# 或者Cargo.toml 加入 
-# rbatis-core = { features = ["runtime-tokio","all-type"]}
+# add the line below in Cargo.toml to used async_std
+async-std = { version = "*", features = ["attributes","tokio02"] }
+rbatis-core = { version = "*", default-features = false ,  features = ["all","tokio02"] }
+rbatis = { version = "*", default-features = false , features = ["tokio02"] }
 ```
 
+### Related Projects
+* Logging: https://github.com/rbatis/fast_log
 
-### 和Rbatis相关项目
-* Log日志库 https://github.com/rbatis/fast_log
-* Rbatis/Core  https://github.com/rbatis/rbatis/tree/master/rbatis-core
-
-
-# TODO 即将到来的特性
+# TODO and upcoming features
 
 
+## In order to achieve the satisfaction of this ORM framework, your support is always our motivation, we are eager to welcome WeChat to donate to support us ~ or ~ star at the top right corner
 ## 为了称心如意的ORM框架，您的支持永远是我们的动力，迫切欢迎微信捐赠支持我们 ~或者~右上角点下star
 ![Image text](https://zhuxiujia.github.io/gomybatis.io/assets/wx_account.jpg)

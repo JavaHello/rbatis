@@ -1,29 +1,10 @@
 use std::ops::Add;
 
-use futures_core::core_reexport::any::Any;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-
 use rbatis_core::convert::StmtConvert;
 use rbatis_core::db::DriverType;
 use rbatis_core::Error;
-
-/// when sql not end with WHERE,AND,OR it will be append " AND "
-macro_rules! add_and {
-        ($self:tt) => {
-          if !$self.sql.ends_with(" WHERE ") && !$self.sql.ends_with(" AND ") && !$self.sql.ends_with(" OR ") {
-             $self.sql.push_str(" AND ");
-          }
-        };
-    }
-
-macro_rules! add_or {
-        ($self:tt) => {
-          if !$self.sql.ends_with(" WHERE ") && !$self.sql.ends_with(" AND ") && !$self.sql.ends_with(" OR ") {
-              $self.sql.push_str(" OR ");
-          }
-        };
-    }
 
 /// you can serialize to JSON, and Clone, Debug
 /// use json rpc send this Wrapper to server
@@ -35,6 +16,8 @@ macro_rules! add_or {
 ///             .ne("id", 1)
 ///             .and()
 ///             .in_array("id", &[1, 2, 3])
+///             .in_("id", &[1, 2, 3])
+///             .r#in("id", &[1, 2, 3])
 ///             .and()
 ///             .not_in("id", &[1, 2, 3])
 ///             .and()
@@ -53,7 +36,7 @@ pub struct Wrapper {
     pub sql: String,
     pub args: Vec<serde_json::Value>,
     pub error: Option<Error>,
-    pub checked: bool
+    pub checked: bool,
 }
 
 impl Wrapper {
@@ -63,7 +46,7 @@ impl Wrapper {
             sql: "".to_string(),
             args: vec![],
             error: None,
-            checked: false
+            checked: false,
         }
     }
 
@@ -73,7 +56,7 @@ impl Wrapper {
             sql: sql.to_string(),
             args: args.clone(),
             error: None,
-            checked: false
+            checked: false,
         }
     }
 
@@ -90,37 +73,44 @@ impl Wrapper {
             sql: self.sql.clone(),
             args: self.args.clone(),
             error: self.error.clone(),
-            checked: true
+            checked: true,
         };
         return Ok(clone);
     }
 
     /// link left Wrapper to this Wrapper
     /// for Example:
-    ///  let w = Wrapper::new(&DriverType::Postgres).eq("a", "1").check().unwrap();
-    ///  let w2 = Wrapper::new(&DriverType::Postgres).eq("b", "2")
-    ///             .and()
-    ///             .right_link_wrapper(&w)
-    ///             .check().unwrap();
-    ///  println!("sql:{:?}", w2.sql.as_str());  // sql:"a =  $1 a =  $2 "
-    ///  println!("arg:{:?}", w2.args.clone()); // arg:[String("1"), String("2")]
+    /// let w = Wrapper::new(&DriverType::Postgres).push_sql("(").eq("a", "1").push_sql(")").check().unwrap();
+    /// let w2 = Wrapper::new(&DriverType::Postgres).eq("b", "2")
+    /// .and()
+    /// .push_wrapper(&w)
+    /// .check().unwrap();
+    /// println!("sql:{:?}", w2.sql.as_str());  // sql:"b = ? AND (a = ?)"
+    /// println!("arg:{:?}", w2.args.clone()); // arg:[String("2"), String("1")]
     ///
-    pub fn right_link_wrapper(&mut self, arg: &Wrapper) -> &mut Self {
-        self.right_link(&arg.driver_type, &arg.sql, &arg.args)
+    pub fn push_wrapper(&mut self, arg: &Wrapper) -> &mut Self {
+        self.push(&arg.sql, &arg.args)
     }
 
-    pub fn right_link(&mut self, driver_type: &DriverType, sql: &str, args: &Vec<Value>) -> &mut Self {
+    /// push sql,args into self
+    pub fn push<T>(&mut self, sql: &str, args: &[T]) -> &mut Self
+        where T: Serialize {
         let mut new_sql = sql.to_string();
-        if driver_type.eq(&DriverType::Postgres) {
-            let arg_old_len = args.len();
-            for index in 0..arg_old_len {
-                let str = driver_type.stmt_convert(index);
-                new_sql = new_sql.replace(str.as_str(), driver_type.stmt_convert(index + arg_old_len).as_str());
+        if self.driver_type.eq(&DriverType::Postgres) {
+            for index in 0..args.len() {
+                let str = self.driver_type.stmt_convert(index);
+                new_sql = new_sql.replace(str.as_str(), self.driver_type.stmt_convert(index + args.len()).as_str());
             }
         }
         self.sql.push_str(new_sql.as_str());
+
+        let args = serde_json::to_value(args).unwrap_or(serde_json::Value::Null);
+        if args.is_null() {
+            return self;
+        }
+        let args = args.as_array().unwrap();
         for x in args {
-            self.args.push(x.clone());
+            self.args.push(x.to_owned());
         }
         self
     }
@@ -170,49 +160,75 @@ impl Wrapper {
         self
     }
 
-    pub fn trim_sql(&mut self, sql: &str) -> &mut Self {
-        self.sql = self.sql.trim().to_string();
+    pub fn set_args<T>(&mut self, args: &[T]) -> &mut Self where T: Serialize {
+        let v = serde_json::to_value(args).unwrap_or(serde_json::Value::Null);
+        if v.is_null() {
+            return self;
+        }
+        if v.is_array() {
+            self.args = v.as_array().unwrap_or(&vec![]).to_owned();
+        }
         self
     }
 
-    pub fn trim_sql_start(&mut self, sql: &str) -> &mut Self {
-        self.sql = self.sql.trim_start().to_string();
+    pub fn push_arg<T>(&mut self, arg: T) -> &mut Self where T: Serialize {
+        let v = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        self.args.push(v);
         self
     }
 
-    pub fn trim_sql_end(&mut self, sql: &str) -> &mut Self {
-        self.sql = self.sql.trim_end().to_string();
+    pub fn pop_arg(&mut self) -> &mut Self {
+        self.args.pop();
         self
     }
 
+    fn is_start_opt(&self) -> bool {
+        let sql = self.sql.trim_end();
+        sql.ends_with("WHERE")
+            || sql.ends_with("AND")
+            || sql.ends_with("OR")
+            || sql.ends_with("(")
+            || sql.ends_with(",")
+            || sql.ends_with("=")
+            || sql.ends_with("+")
+            || sql.ends_with("-")
+            || sql.ends_with("*")
+            || sql.ends_with("/")
+    }
 
     /// link wrapper sql, if end with where , do nothing
     pub fn and(&mut self) -> &mut Self {
-        add_and!(self);
-        self.sql.push_str(" AND ");
+        if !self.is_start_opt() {
+            self.sql.push_str(" AND ");
+        }
         self
     }
 
     /// link wrapper sql, if end with where , do nothing
     pub fn or(&mut self) -> &mut Self {
-        add_or!(self);
-        self.sql.push_str(" OR ");
+        if !self.is_start_opt() {
+            self.sql.push_str(" OR ");
+        }
         self
     }
 
     pub fn having(&mut self, sql_having: &str) -> &mut Self {
-        add_and!(self);
+        self.and();
         self.sql.push_str(format!(" HAVING {} ", sql_having).as_str());
         self
     }
 
     /// arg: JsonObject or struct{} or map[String,**]
-    pub fn all_eq<T>(&mut self, arg: &T) -> &mut Self
+    pub fn all_eq<T>(&mut self, arg: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(arg).unwrap();
+        self.and();
+        let v = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        if v.is_null() {
+            self.error = Some(Error::from("[rbatis] wrapper all_eq only support object/map struct!"));
+            return self;
+        }
         if !v.is_object() {
-            self.error = Some(Error::from("[rbatis] wrapper all_eq only support object struct!"));
+            self.error = Some(Error::from("[rbatis] wrapper all_eq only support object/map struct!"));
             return self;
         }
         let map = v.as_object().unwrap();
@@ -236,8 +252,8 @@ impl Wrapper {
     ///  eq("a",1) " a = 1 "
     pub fn eq<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" = {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -249,8 +265,8 @@ impl Wrapper {
     /// not equal
     pub fn ne<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" <> {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -263,7 +279,9 @@ impl Wrapper {
             return self;
         }
         let mut index = 0;
-        self.sql = self.sql.trim_end_matches(" WHERE").trim_end_matches("WHERE ").to_string();
+        self.sql = self.sql.trim_end_matches(" WHERE ")
+            .trim_end_matches(" AND ")
+            .trim_end_matches(" OR ").to_string();
         self.sql.push_str(" ORDER BY ");
         for x in columns {
             if is_asc {
@@ -285,7 +303,9 @@ impl Wrapper {
             return self;
         }
         let mut index = 0;
-        self.sql = self.sql.trim_end_matches(" WHERE").trim_end_matches("WHERE ").to_string();
+        self.sql = self.sql.trim_end_matches(" WHERE ")
+            .trim_end_matches(" AND ")
+            .trim_end_matches(" OR ").to_string();
         self.sql.push_str(" GROUP BY ");
         for x in columns {
             self.sql.push_str(x);
@@ -300,8 +320,8 @@ impl Wrapper {
     ///  sql:   column > obj
     pub fn gt<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" > {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -310,8 +330,8 @@ impl Wrapper {
     ///  sql:   column >= obj
     pub fn ge<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" >= {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -321,8 +341,8 @@ impl Wrapper {
     ///  sql:   column < obj
     pub fn lt<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" < {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -333,8 +353,8 @@ impl Wrapper {
     ///  sql:   column <= obj
     pub fn le<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" <= {}", self.driver_type.stmt_convert(self.args.len())).as_str());
         self.args.push(v);
@@ -343,9 +363,9 @@ impl Wrapper {
 
     pub fn between<T>(&mut self, column: &str, min: T, max: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let min_v = serde_json::to_value(min).unwrap();
-        let max_v = serde_json::to_value(max).unwrap();
+        self.and();
+        let min_v = serde_json::to_value(min).unwrap_or(serde_json::Value::Null);
+        let max_v = serde_json::to_value(max).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" BETWEEN {} AND {}", self.driver_type.stmt_convert(self.args.len()), self.driver_type.stmt_convert(self.args.len() + 1)).as_str());
         self.args.push(min_v);
@@ -355,9 +375,9 @@ impl Wrapper {
 
     pub fn not_between<T>(&mut self, column: &str, min: T, max: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let min_v = serde_json::to_value(min).unwrap();
-        let max_v = serde_json::to_value(max).unwrap();
+        self.and();
+        let min_v = serde_json::to_value(min).unwrap_or(serde_json::Value::Null);
+        let max_v = serde_json::to_value(max).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         self.sql.push_str(format!(" NOT BETWEEN {} AND {}", self.driver_type.stmt_convert(self.args.len()), self.driver_type.stmt_convert(self.args.len() + 1)).as_str());
         self.args.push(min_v);
@@ -367,64 +387,90 @@ impl Wrapper {
 
     pub fn like<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+        let mut v_str = String::new();
+        if v.is_string() {
+            v_str = format!("%{}%", v.as_str().unwrap());
+        } else {
+            v_str = format!("%{}%", v.to_string());
+        }
         self.sql.push_str(column);
-        self.sql.push_str(format!(" LIKE '%{}%'", self.driver_type.stmt_convert(self.args.len())).as_str());
-        self.args.push(v);
+        self.sql.push_str(format!(" LIKE {}", self.driver_type.stmt_convert(self.args.len())).as_str());
+        self.args.push(json!(v_str));
         self
     }
+
     pub fn like_left<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+        let mut v_str = String::new();
+        if v.is_string() {
+            v_str = format!("%{}", v.as_str().unwrap());
+        } else {
+            v_str = format!("%{}", v.to_string());
+        }
         self.sql.push_str(column);
-        self.sql.push_str(format!(" LIKE '%{}'", self.driver_type.stmt_convert(self.args.len())).as_str());
-        self.args.push(v);
+        self.sql.push_str(format!(" LIKE {}", self.driver_type.stmt_convert(self.args.len())).as_str());
+        self.args.push(json!(v_str));
         self
     }
 
     pub fn like_right<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+        let mut v_str = String::new();
+        if v.is_string() {
+            v_str = format!("{}%", v.as_str().unwrap());
+        } else {
+            v_str = format!("{}%", v.to_string());
+        }
         self.sql.push_str(column);
-        self.sql.push_str(format!(" LIKE '{}%'", self.driver_type.stmt_convert(self.args.len())).as_str());
-        self.args.push(v);
+        self.sql.push_str(format!(" LIKE {}", self.driver_type.stmt_convert(self.args.len())).as_str());
+        self.args.push(json!(v_str));
         self
     }
 
     pub fn not_like<T>(&mut self, column: &str, obj: T) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
+        let mut v_str = String::new();
+        if v.is_string() {
+            v_str = format!("%{}%", v.as_str().unwrap());
+        } else {
+            v_str = format!("%{}%", v.to_string());
+        }
         self.sql.push_str(column);
-        self.sql.push_str(format!(" NOT LIKE '%{}%'", self.driver_type.stmt_convert(self.args.len())).as_str());
-        self.args.push(v);
+        self.sql.push_str(format!(" NOT LIKE {}", self.driver_type.stmt_convert(self.args.len())).as_str());
+        self.args.push(json!(v_str));
         self
     }
 
     pub fn is_null(&mut self, column: &str) -> &mut Self {
-        add_and!(self);
+        self.and();
         self.sql.push_str(column);
         self.sql.push_str(" IS NULL");
         self
     }
 
     pub fn is_not_null(&mut self, column: &str) -> &mut Self {
-        add_and!(self);
+        self.and();
         self.sql.push_str(column);
         self.sql.push_str(" IS NOT NULL");
         self
     }
 
+    /// gen sql: * in (*,*,*)
     pub fn in_array<T>(&mut self, column: &str, obj: &[T]) -> &mut Self
         where T: Serialize {
-        add_and!(self);
+        self.and();
         if obj.len() == 0 {
             return self;
         }
-        let v = serde_json::to_value(obj).unwrap();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         let vec = v.as_array().unwrap();
         let mut sqls = String::new();
@@ -438,10 +484,23 @@ impl Wrapper {
         self
     }
 
+    /// gen sql: * in (*,*,*)
+    pub fn in_<T>(&mut self, column: &str, obj: &[T]) -> &mut Self
+        where T: Serialize {
+        self.in_array(column,obj)
+    }
+
+    /// gen sql: * in (*,*,*)
+    pub fn r#in<T>(&mut self, column: &str, obj: &[T]) -> &mut Self
+        where T: Serialize {
+        self.in_array(column,obj)
+    }
+
+
     pub fn not_in<T>(&mut self, column: &str, obj: &[T]) -> &mut Self
         where T: Serialize {
-        add_and!(self);
-        let v = serde_json::to_value(obj).unwrap();
+        self.and();
+        let v = serde_json::to_value(obj).unwrap_or(serde_json::Value::Null);
         self.sql.push_str(column);
         let vec = v.as_array().unwrap();
         let mut sqls = String::new();
@@ -456,12 +515,22 @@ impl Wrapper {
     }
 
     pub fn trim_and(&mut self) -> &mut Self {
-        self.sql = self.sql.trim_start_matches(" AND ").trim_end_matches(" AND ").to_string();
+        self.sql = self.sql
+            .trim_start_matches(" AND ")
+            .trim_end_matches(" AND ")
+            .trim_start_matches("AND ")
+            .trim_end_matches(" AND")
+            .to_string();
         self
     }
 
     pub fn trim_or(&mut self) -> &mut Self {
-        self.sql = self.sql.trim_start_matches(" OR ").trim_end_matches(" OR ").to_string();
+        self.sql = self.sql.
+            trim_start_matches(" OR ")
+            .trim_end_matches(" OR ")
+            .trim_start_matches("OR ")
+            .trim_end_matches(" OR")
+            .to_string();
         self
     }
 }
@@ -480,7 +549,7 @@ impl Case {
         }
     }
 
-    pub fn call_func<'s,'a>(&'s self, w: &'a mut Wrapper) -> &'a mut Wrapper {
+    pub fn call_func<'s, 'a>(&'s self, w: &'a mut Wrapper) -> &'a mut Wrapper {
         (self.func)(w)
     }
 }
@@ -519,17 +588,20 @@ mod test {
     }
 
 
+    ///cargo test --release --color=always --package rbatis --lib wrapper::test::bench_select --no-fail-fast -- --exact -Z unstable-options --show-output
     ///run with windows10:
     ///  use Time: 0.51 s,each:5100 nano/op  use TPS: 196078.431372549 TPS/s
     #[test]
     fn bench_select() {
+        let mut map = Map::new();
+        map.insert("a".to_string(), json!("1"));
         let mut b = Bencher::new(100000);
-        b.iter(|| {
-            let mut m = Map::new();
-            m.insert("a".to_string(), json!("1"));
+        b.iter_mut(&mut map, |m| {
             let w = Wrapper::new(&DriverType::Mysql).eq("id", 1)
                 .ne("id", 1)
                 .in_array("id", &[1, 2, 3])
+                .r#in("id",&[1,2,3])
+                .in_("id",&[1,2,3])
                 .not_in("id", &[1, 2, 3])
                 .all_eq(&m)
                 .like("name", 1)
@@ -547,7 +619,7 @@ mod test {
         let w = Wrapper::new(&DriverType::Postgres).eq("a", "1").check().unwrap();
         let w2 = Wrapper::new(&DriverType::Postgres).eq("b", "2")
             .and()
-            .right_link_wrapper(&w)
+            .push_wrapper(&w)
             .check().unwrap();
 
         println!("sql:{:?}", w2.sql.as_str());
@@ -573,11 +645,49 @@ mod test {
         let p = 1;
         let w = Wrapper::new(&DriverType::Postgres)
             .do_match(&[
-                Case::new(p==0, |w| w.eq("a","some")),
-                Case::new(p==2, |w| w.eq("a","none")),
-            ], |w| w.eq("a","default"))
+                Case::new(p == 0, |w| w.eq("a", "some")),
+                Case::new(p == 2, |w| w.eq("a", "none")),
+            ], |w| w.eq("a", "default"))
             .check().unwrap();
         println!("sql:{:?}", w.sql.as_str());
         println!("arg:{:?}", w.args.clone());
+    }
+
+    #[test]
+    fn test_wp() {
+        let w = Wrapper::new(&DriverType::Postgres)
+            .eq("1", "1")
+            .or()
+            .like("TITLE", "title")
+            .or()
+            .like("ORIGINAL_NAME", "saf")
+            .check().unwrap();
+        println!("sql:{:?}", w.sql.as_str());
+        println!("arg:{:?}", w.args.clone());
+    }
+
+    #[test]
+    fn test_push_arg() {
+        let w = Wrapper::new(&DriverType::Mysql)
+            .push_sql("?,?")
+            .push_arg(1)
+            .push_arg("asdfasdfa")
+            .check().unwrap();
+        println!("sql:{:?}", w.sql.as_str());
+        println!("arg:{:?}", w.args.clone());
+    }
+
+    #[test]
+    fn test_push_wrapper() {
+        let mut w1 = Wrapper::new(&DriverType::Mysql);
+        let mut w2 = w1.clone();
+
+        let w2 = w1
+            .eq("b", "2")
+            .and()
+            .push_wrapper(&w2.push_sql("(").eq("a", "1").push_sql(")").check().unwrap())
+            .check().unwrap();
+        println!("sql:{:?}", w2.sql.as_str());
+        println!("arg:{:?}", w2.args.clone());
     }
 }

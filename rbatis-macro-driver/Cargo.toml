@@ -1,18 +1,24 @@
 [package]
 name = "rbatis-macro-driver"
-version = "1.5.8"
+version = "1.8.5"
 description = "rbatis macro driver 高性能Rust ORM框架 宏系统支持"
 readme = "Readme.md"
 authors = ["ce <zhuxiujia@qq.com>"]
 edition = "2018"
 license = "MIT"
+documentation = "https://rbatis.github.io/rbatis.io/#/"
+repository = "https://github.com/rbatis/rbatis"
+homepage = "https://rbatis.github.io/rbatis.io/#/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+# this trait disable print compile info
+no_print=[]
 [lib]
 proc-macro = true
-
 [dependencies]
-syn = "1.0.39"
+proc-macro2 = "1.0.24"
 quote = "1.0.7"
-proc-macro2 = "1.0.19"
+syn = "1.0.44"

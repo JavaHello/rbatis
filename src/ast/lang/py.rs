@@ -143,23 +143,11 @@ impl Py {
                                 }
                             }
                             NodeType::NString(node) => {
-                                let mut nodes=vec![];
-                                let mut news = node.value.clone();
                                 for x in &parserd {
                                     match x {
-                                        NodeType::NString(new_snode) => {
-                                            news = news + new_snode.value.as_str();
-                                            *node = StringNode::new(news.as_str());
-                                        }
                                         parserd => {
-                                          let clone_parserd=parserd.clone();
-                                          nodes.push(clone_parserd);
+                                            pys.push(parserd.clone());
                                         }
-                                    }
-                                }
-                                if !nodes.is_empty(){
-                                    for x in nodes {
-                                        pys.push(x);
                                     }
                                 }
                             }
@@ -187,7 +175,6 @@ impl Py {
         let mut trim_x = x.trim();
         if trim_x.ends_with(":") {
             trim_x = trim_x[0..trim_x.len() - 1].trim();
-
             if trim_x.starts_with("if ") {
                 trim_x = trim_x["if ".len()..].trim();
                 return Ok(NodeType::NIf(IfNode {
@@ -225,14 +212,14 @@ impl Py {
                 } else {
                     return Err(rbatis_core::Error::from("[rbatis] parser express fail:".to_string() + trim_x));
                 }
-            } else if trim_x.starts_with("choose ") {
-                trim_x = trim_x["choose ".len()..].trim();
+            } else if trim_x.starts_with("choose") {
+                trim_x = trim_x["choose".len()..].trim();
                 return Ok(NodeType::NChoose(ChooseNode {
                     when_nodes: None,
                     otherwise_node: None,
                 }));
-            } else if trim_x.starts_with("otherwise ") {
-                trim_x = trim_x["otherwise ".len()..].trim();
+            } else if trim_x.starts_with("otherwise") {
+                trim_x = trim_x["otherwise".len()..].trim();
                 return Ok(NodeType::NOtherwise(OtherwiseNode {
                     childs: vec![],
                 }));
@@ -244,17 +231,21 @@ impl Py {
                 }));
             } else if trim_x.starts_with("bind ") {
                 trim_x = trim_x["bind ".len()..].trim();
+                let name_value: Vec<&str> = trim_x.split(",").collect();
+                if name_value.len() != 2 {
+                    return Err(rbatis_core::Error::from("[rbatis] parser express fail:".to_string() + trim_x));
+                }
                 return Ok(NodeType::NBind(BindNode {
-                    name: "".to_string(),
-                    value: "".to_string(),
+                    name: name_value[0].to_owned(),
+                    value: name_value[1].to_owned(),
                 }));
-            } else if trim_x.starts_with("set ") {
-                trim_x = trim_x["set ".len()..].trim();
+            } else if trim_x.starts_with("set") {
+                trim_x = trim_x["set".len()..].trim();
                 return Ok(NodeType::NSet(SetNode {
                     childs: vec![]
                 }));
-            } else if trim_x.starts_with("where ") {
-                trim_x = trim_x["where ".len()..].trim();
+            } else if trim_x.starts_with("where") {
+                trim_x = trim_x["where".len()..].trim();
                 return Ok(NodeType::NWhere(WhereNode {
                     childs: vec![]
                 }));
@@ -351,15 +342,14 @@ pub fn test_py_interpreter_parse() {
 
 #[test]
 pub fn test_exec() {
-    let s = "SELECT * FROM biz_activity
-      Where del = 2
+    let s = "SELECT * FROM biz_activity where
     if  name!=null:
       name = #{name}
     AND delete_flag1 = #{del}
-    if  age!=1:
-       AND age = 2
-       if  age!=1:
-         AND age = 3
+    if  age != 1:
+       AND age = 1
+       if  age != 1:
+         AND age = 2
     trim 'AND ':
       AND delete_flag2 = #{del}
     AND ids in (
@@ -367,9 +357,14 @@ pub fn test_exec() {
       for item in ids:
         #{item},
     )
-    WHERE id  = '2';";
+    choose:
+        when age==27:
+          AND age = 27
+        otherwise:
+          AND age = 0
+    WHERE id  = 'end';";
     let pys = Py::parse(s).unwrap();
-    //println!("{:?}", pys);
+    println!("{:#?}", pys);
     //for x in &pys {
     // println!("{:?}", x.clone());
     //}
@@ -385,27 +380,25 @@ pub fn test_exec() {
         "ids":[1,2,3]
     });
     let r = crate::ast::node::node::do_child_nodes(&DriverType::Mysql, &pys, &mut env, &mut engine, &mut arg_array).unwrap();
-    println!("{}", r.clone());
-    println!("{:?}", arg_array.clone());
+    println!("result sql:{}", r.clone());
+    println!("arg array:{:?}", arg_array.clone());
 }
 
-//cargo.exe test --release --color=always --package rbatis --lib ast::lang::py::bench_exec --all-features -- --nocapture --exact
+//cargo.exe test --release --color=always --package rbatis --lib ast::lang::py::bench_exec  --nocapture --exact
 #[test]
 pub fn bench_exec() {
     let mut b = Bencher::new(1000000);
-    b.iter(|| {
-        let s = "
-    SELECT * FROM biz_activity
-    if  name!=null:
-      name = #{name}
-    AND delete_flag1 = #{del}
-    if  age!=1:
-       AND age = 2
-       if  age!=1:
-         AND age = 3
-    trim 'AND ':
-      AND delete_flag2 = #{del}
-    WHERE id  = '2';";
-        let pys = Py::parse_and_cache(s);
+    let mut sql = "asdfsdaflakagjsda".to_string();
+    b.iter_mut(&mut sql, |s| {
+        let s = s.ends_with("WHERE")
+            || s.ends_with("AND")
+            || s.ends_with("OR")
+            || s.ends_with("(")
+            || s.ends_with(",")
+            || s.ends_with("=")
+            || s.ends_with("+")
+            || s.ends_with("-")
+            || s.ends_with("*")
+            || s.ends_with("/");
     });
 }

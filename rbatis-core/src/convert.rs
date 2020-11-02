@@ -1,4 +1,8 @@
+use serde_json::Value;
+use sqlx_core::mysql::MySqlValue;
+
 use crate::db::DriverType;
+use crate::Result;
 
 ///the stmt replace str convert
 pub trait StmtConvert {
@@ -9,13 +13,16 @@ impl StmtConvert for DriverType {
     fn stmt_convert(&self, index: usize) -> String {
         match &self {
             DriverType::Postgres => {
-                format!(" ${} ", index + 1)
+                format!("${}", index + 1)
             }
             DriverType::Mysql => {
-                " ? ".to_string()
+                "?".to_string()
             }
             DriverType::Sqlite => {
-                " ? ".to_string()
+                "?".to_string()
+            }
+            DriverType::Mssql => {
+                "?".to_string()
             }
             DriverType::None => {
                 panic!("[rbatis] un support none for driver type!")
@@ -24,3 +31,14 @@ impl StmtConvert for DriverType {
     }
 }
 
+///json convert
+pub trait JsonCodec {
+    /// to an json value
+    fn try_to_json(self) -> Result<Value>;
+}
+
+///json convert
+pub trait RefJsonCodec {
+    /// to an json value
+    fn try_to_json(&self) -> Result<Value>;
+}

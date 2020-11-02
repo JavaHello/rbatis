@@ -88,7 +88,8 @@ impl RbatisEngine {
 pub fn is_number(arg: &String) -> bool {
     let chars = arg.chars();
     for item in chars {
-        if item == '.' ||
+        if item == '-' ||
+            item == '.' ||
             item == '0' ||
             item == '1' ||
             item == '2' ||
@@ -117,6 +118,7 @@ pub fn parser_tokens(s: &String, opt_map: &OptMap) -> Vec<String> {
     //str
     let mut find_str = false;
     let mut temp_str = String::new();
+
     //opt
     let mut temp_arg = String::new();
     let mut index: i32 = -1;
@@ -153,6 +155,12 @@ pub fn parser_tokens(s: &String, opt_map: &OptMap) -> Vec<String> {
         //opt node
         if is_opt {
             //println!("is opt:{}", item);
+            if item.eq(&'-') && (result.len() == 0 || opt_map.is_opt(result.back().unwrap_or(&"".to_string()))) {
+                trim_push_back("0", &mut result);
+            }
+            if item.eq(&'+') && (result.len() == 0 || opt_map.is_opt(result.back().unwrap_or(&"".to_string()))) {
+                trim_push_back("0", &mut result);
+            }
             if result.len() > 0 {
                 let def = String::new();
                 let back = result.back().unwrap_or(&def).clone();
@@ -175,7 +183,7 @@ pub fn parser_tokens(s: &String, opt_map: &OptMap) -> Vec<String> {
     return v;
 }
 
-fn trim_push_back(arg: &String, list: &mut LinkedList<String>) {
+fn trim_push_back(arg: &str, list: &mut LinkedList<String>) {
     let trim_str = arg.trim().to_string();
     if trim_str.is_empty() {
         return;

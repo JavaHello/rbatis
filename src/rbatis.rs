@@ -1,21 +1,12 @@
 use std::cell::Cell;
 use std::collections::HashMap;
-
-use dashmap::DashMap;
-use log::{error, info, LevelFilter, warn};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use serde::ser::Serialize;
-
-use rbatis_core::connection::Connection;
-use rbatis_core::cursor::Cursor;
-use rbatis_core::db::{DBPool, DBPoolConn, DBQuery, DBTx, DriverType, PoolOptions};
+use serde_json::Number;
+use rbatis_core::db_adapter::{DBPool, DBPoolConn, DBQuery, DBTx, DBExecResult};
 use rbatis_core::Error;
-use rbatis_core::executor::Executor;
-use rbatis_core::pool::{Pool, PoolConnection};
-use rbatis_core::query::{query, Query};
-use rbatis_core::query_as::query_as;
-use rbatis_core::transaction::Transaction;
+use rbatis_core::sync::sync_map::SyncMap;
 
 use crate::ast::ast::RbatisAST;
 use crate::ast::lang::py::Py;
@@ -27,27 +18,36 @@ use crate::ast::node::node_type::NodeType;
 use crate::ast::node::select_node::SelectNode;
 use crate::ast::node::update_node::UpdateNode;
 use crate::engine::runtime::RbatisEngine;
+use crate::plugin::intercept::SqlIntercept;
+use crate::plugin::log::{LogPlugin, RbatisLog};
 use crate::plugin::logic_delete::{LogicDelete, RbatisLogicDeletePlugin};
 use crate::plugin::page::{IPage, IPageRequest, Page, PagePlugin, RbatisPagePlugin};
 use crate::sql::PageLimit;
 use crate::utils::error_util::ToResult;
 use crate::wrapper::Wrapper;
+use rbatis_core::db::{DriverType, PoolOptions};
 
 /// rbatis engine
 pub struct Rbatis {
+    // the connection pool,use OnceCell init this
     pub pool: OnceCell<DBPool>,
+    // the engine run some express for example:'1+1'=2
     pub engine: RbatisEngine,
     // map<mapper_name,map<method_name,NodeType>>
     pub mapper_node_map: HashMap<String, HashMap<String, NodeType>>,
     //context of tx
-    pub context: DashMap<String, DBTx>,
+    pub tx_context: SyncMap<String, DBTx>,
     // page plugin
     pub page_plugin: Box<dyn PagePlugin>,
+    // sql intercept vec chain
+    pub sql_intercepts: Vec<Box<dyn SqlIntercept>>,
     // logic delete plugin
     pub logic_plugin: Option<Box<dyn LogicDelete>>,
+    // log plugin
+    pub log_plugin: Box<dyn LogPlugin>,
 }
 
-impl<'r> Default for Rbatis {
+impl Default for Rbatis {
     fn default() -> Rbatis {
         Rbatis::new()
     }
@@ -59,9 +59,11 @@ impl Rbatis {
             pool: OnceCell::new(),
             mapper_node_map: HashMap::new(),
             engine: RbatisEngine::new(),
-            context: DashMap::new(),
+            tx_context: SyncMap::new(),
             page_plugin: Box::new(RbatisPagePlugin {}),
+            sql_intercepts: vec![],
             logic_plugin: None,
+            log_plugin: Box::new(RbatisLog {}),
         };
     }
 
@@ -133,46 +135,46 @@ impl Rbatis {
         if new_tx_id.is_empty() {
             return Err(rbatis_core::Error::from("[rbatis] tx_id can not be empty"));
         }
-        let conn = self.get_pool()?.begin().await?;
+        let conn:DBTx = self.get_pool()?.begin().await?;
         //send tx to context
-        self.context.insert(new_tx_id.to_string(), conn);
-        info!("[rbatis] [{}] Begin", new_tx_id);
+        self.tx_context.insert(new_tx_id.to_string(), conn).await;
+        self.log_plugin.info(&format!("[rbatis] [{}] Begin", new_tx_id));
         return Ok(1);
     }
 
-    /// begin tx,with an exist conn
-    pub async fn begin_with_conn(&self, new_tx_id: &str, db_conn: DBPoolConn) -> Result<u64, rbatis_core::Error> {
-        if new_tx_id.is_empty() {
-            return Err(rbatis_core::Error::from("[rbatis] tx_id can not be empty"));
-        }
-        let conn = db_conn.begin().await?;
-        //send tx to context
-        self.context.insert(new_tx_id.to_string(), conn);
-        info!("[rbatis] [{}] Begin", new_tx_id);
-        return Ok(1);
-    }
+    // /// begin tx,with an exist conn
+    // pub async fn begin_with_conn(&self, new_tx_id: &str, mut db_conn: DBPoolConn) -> Result<u64, rbatis_core::Error> {
+    //     if new_tx_id.is_empty() {
+    //         return Err(rbatis_core::Error::from("[rbatis] tx_id can not be empty"));
+    //     }
+    //     let conn = db_conn.begin().await?;
+    //     //send tx to context
+    //     self.tx_context.insert(new_tx_id.to_string(), conn).await;
+    //     self.log_plugin.info(&format!("[rbatis] [{}] Begin", new_tx_id));
+    //     return Ok(1);
+    // }
 
     /// commit tx,and return conn
-    pub async fn commit(&self, tx_id: &str) -> Result<DBPoolConn, rbatis_core::Error> {
-        let tx = self.context.remove(tx_id);
+    pub async fn commit(&self, tx_id: &str) -> Result<(), rbatis_core::Error> {
+        let tx = self.tx_context.remove(tx_id).await;
         if tx.is_none() {
             return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
         }
-        let (key, mut tx) = tx.unwrap();
+        let mut tx = tx.unwrap();
         let result = tx.commit().await?;
-        info!("[rbatis] [{}] Commit", tx_id);
+        self.log_plugin.info(&format!("[rbatis] [{}] Commit", tx_id));
         return Ok(result);
     }
 
     /// rollback tx,and return conn
-    pub async fn rollback(&self, tx_id: &str) -> Result<DBPoolConn, rbatis_core::Error> {
-        let tx_op = self.context.remove(tx_id);
+    pub async fn rollback(&self, tx_id: &str) -> Result<(), rbatis_core::Error> {
+        let tx_op = self.tx_context.remove(tx_id).await;
         if tx_op.is_none() {
             return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
         }
-        let (key, mut tx) = tx_op.unwrap();
+        let tx = tx_op.unwrap();
         let result = tx.rollback().await?;
-        info!("[rbatis] [{}] Rollback", tx_id);
+        self.log_plugin.info(&format!("[rbatis] [{}] Rollback", tx_id));
         return Ok(result);
     }
 
@@ -180,55 +182,62 @@ impl Rbatis {
     /// fetch result(row sql)
     pub async fn fetch<T>(&self, tx_id: &str, sql: &str) -> Result<T, rbatis_core::Error>
         where T: DeserializeOwned {
-        info!("[rbatis] [{}] Query ==> {}", tx_id, sql);
-        let data;
-        let fetch_num;
+
+        //sql intercept
+        let mut sql = sql.to_string();
+        for item in &self.sql_intercepts {
+            item.do_intercept(self, &mut sql, &mut vec![], false);
+        }
+
+        self.log_plugin.info(&format!("[rbatis] [{}] Query ==> {}", tx_id, sql.as_str()));
+        let result;
+        let mut fetch_num = 0;
         if tx_id.is_empty() {
             let mut conn = self.get_pool()?.acquire().await?;
-            let mut c = conn.fetch(sql)?;
-            let json = c.fetch_json().await?;
-            fetch_num = json.len();
-            data = rbatis_core::decode::json_decode::<T>(json)?;
+            let (data, num) = conn.fetch(sql.as_str()).await?;
+            result = data;
+            fetch_num = num;
         } else {
-            let conn = self.context.get_mut(tx_id);
+            let conn = self.tx_context.get_mut(tx_id).await;
             if conn.is_none() {
                 return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
             }
             let mut conn = conn.unwrap();
-            let c = conn.fetch(sql);
-            if c.is_err() {
-                let e = c.err().unwrap();
-                return Err(e);
-            }
-            let mut c = c.unwrap();
-            let json = c.fetch_json().await?;
-            fetch_num = json.len();
-            data = rbatis_core::decode::json_decode::<T>(json)?;
+            let (data, num) = conn.fetch(sql.as_str()).await?;
+            result = data;
+            fetch_num = num;
         }
-        info!("[rbatis] [{}] ReturnRows <== {}", tx_id, fetch_num);
-        return Ok(data);
+        self.log_plugin.info(&format!("[rbatis] [{}] ReturnRows <== {}", tx_id, fetch_num));
+        return Ok(result);
     }
 
     /// exec sql(row sql)
-    pub async fn exec(&self, tx_id: &str, sql: &str) -> Result<u64, rbatis_core::Error> {
-        info!("[rbatis] [{}] Exec ==> :{}", tx_id, sql);
+    pub async fn exec(&self, tx_id: &str, sql: &str) -> Result<DBExecResult, rbatis_core::Error> {
+
+        //sql intercept
+        let mut sql = sql.to_string();
+        for item in &self.sql_intercepts {
+            item.do_intercept(self, &mut sql, &mut vec![], false);
+        }
+
+        self.log_plugin.info(&format!("[rbatis] [{}] Exec ==> :{}", tx_id, &sql));
         let data;
         if tx_id.is_empty() {
             let mut conn = self.get_pool()?.acquire().await?;
-            data = conn.execute(sql).await?;
+            data = conn.execute(&sql).await?;
         } else {
-            let conn = self.context.get_mut(tx_id);
+            let conn = self.tx_context.get_mut(tx_id).await;
             if conn.is_none() {
                 return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
             }
             let mut conn = conn.unwrap();
-            data = conn.execute(sql).await?;
+            data = conn.execute(&sql).await?;
         }
-        info!("[rbatis] [{}] RowsAffected <== {}", tx_id, &data);
+        self.log_plugin.info(&format!("[rbatis] [{}] RowsAffected <== {}", tx_id, &data.rows_affected));
         return Ok(data);
     }
 
-    fn bind_arg<'a>(&self, sql: &'a str, arg: &Vec<serde_json::Value>) -> Result<DBQuery<'a>, rbatis_core::Error> {
+    fn bind_arg<'arg>(&self, sql: &'arg str, arg: &Vec<serde_json::Value>) -> Result<DBQuery<'arg>, rbatis_core::Error> {
         let mut q: DBQuery = self.get_pool()?.make_query(sql)?;
         for x in arg {
             q.bind_value(x);
@@ -237,57 +246,71 @@ impl Rbatis {
     }
 
     /// fetch result(prepare sql)
-    pub async fn fetch_prepare<T>(&self, tx_id: &str, sql: &str, arg: &Vec<serde_json::Value>) -> Result<T, rbatis_core::Error>
+    pub async fn fetch_prepare<T>(&self, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>) -> Result<T, rbatis_core::Error>
         where T: DeserializeOwned {
-        info!("[rbatis] [{}] Query ==> {}", tx_id, sql);
-        info!("[rbatis] [{}] Args  ==> {}", tx_id, serde_json::to_string(arg).unwrap_or("".to_string()));
-        let result;
-        let return_num;
+
+        //sql intercept
+        let mut sql = sql.to_string();
+        let mut args = args.clone();
+        for item in &self.sql_intercepts {
+            item.do_intercept(self, &mut sql, &mut args, true);
+        }
+
+        self.log_plugin.info(&format!("[rbatis] [{}] Query ==> {}", tx_id, &sql));
+        self.log_plugin.info(&format!("[rbatis] [{}] Args  ==> {}", tx_id, serde_json::to_string(&args).unwrap_or("".to_string())));
+        let result_data;
+        let mut return_num = 0;
         if tx_id.is_empty() {
             let mut conn = self.get_pool()?.acquire().await?;
-            let q: DBQuery = self.bind_arg(sql, arg)?;
-            let mut c = conn.fetch_parperd(q)?;
-            let json_array = c.fetch_json().await?;
-            return_num = json_array.len();
-            result = rbatis_core::decode::json_decode::<T>(json_array)?;
+            let q: DBQuery = self.bind_arg(&sql, &args)?;
+            let (result, num) = conn.fetch_parperd(q).await?;
+            result_data = result;
+            return_num = num;
         } else {
-            let q: DBQuery = self.bind_arg(sql, arg)?;
-            let conn = self.context.get_mut(tx_id);
+            let q: DBQuery = self.bind_arg(&sql, &args)?;
+            let conn = self.tx_context.get_mut(tx_id).await;
             if conn.is_none() {
                 return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
             }
             let mut conn = conn.unwrap();
-            let mut c = conn.fetch_parperd(q)?;
-            let json = c.fetch_json().await?;
-            return_num = json.len();
-            result = rbatis_core::decode::json_decode::<T>(json)?;
+            let (result, num) = conn.fetch_parperd(q).await?;
+            result_data = result;
+            return_num = num;
         }
-        info!("[rbatis] [{}] ReturnRows <== {}", tx_id, return_num);
-        return Ok(result);
+        self.log_plugin.info(&format!("[rbatis] [{}] ReturnRows <== {}", tx_id, return_num));
+        return Ok(result_data);
     }
 
     /// exec sql(prepare sql)
-    pub async fn exec_prepare(&self, tx_id: &str, sql: &str, arg: &Vec<serde_json::Value>) -> Result<u64, rbatis_core::Error> {
-        info!("[rbatis] [{}] Exec ==> {}", tx_id, sql);
-        info!("[rbatis] [{}] Args ==> {}", tx_id, serde_json::to_string(arg).unwrap_or("".to_string()));
+    pub async fn exec_prepare(&self, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>) -> Result<DBExecResult, rbatis_core::Error> {
+
+        //sql intercept
+        let mut sql = sql.to_string();
+        let mut args = args.clone();
+        for item in &self.sql_intercepts {
+            item.do_intercept(self, &mut sql, &mut args, true);
+        }
+
+        self.log_plugin.info(&format!("[rbatis] [{}] Exec ==> {}", tx_id, &sql));
+        self.log_plugin.info(&format!("[rbatis] [{}] Args ==> {}", tx_id, serde_json::to_string(&args).unwrap_or("".to_string())));
         let result;
         if tx_id.is_empty() {
-            let q: DBQuery = self.bind_arg(sql, arg)?;
+            let q: DBQuery = self.bind_arg(&sql, &args)?;
             let mut conn = self.get_pool()?.acquire().await?;
-            result = conn.execute_parperd(q).await;
+            result = conn.exec_prepare(q).await;
         } else {
-            let q: DBQuery = self.bind_arg(sql, arg)?;
-            let conn = self.context.get_mut(tx_id);
+            let q: DBQuery = self.bind_arg(&sql, &args)?;
+            let conn = self.tx_context.get_mut(tx_id).await;
             if conn.is_none() {
                 return Err(rbatis_core::Error::from(format!("[rbatis] tx:{} not exist！", tx_id)));
             }
             let mut conn = conn.unwrap();
-            result = conn.execute_parperd(q).await;
+            result = conn.exec_prepare(q).await;
         }
         if result.is_ok() {
-            info!("[rbatis] [{}] RowsAffected <== {}", tx_id, result.as_ref().unwrap());
+            self.log_plugin.info(&format!("[rbatis] [{}] RowsAffected <== {:#?}", tx_id, result.as_ref()));
         } else {
-            info!("[rbatis] [{}] RowsAffected <== {}", tx_id, 0);
+            self.log_plugin.info(&format!("[rbatis] [{}] RowsAffected <== {}", tx_id, 0));
         }
         return result;
     }
@@ -317,15 +340,18 @@ impl Rbatis {
     }
 
     /// fetch result(prepare sql)
-    pub async fn xml_fetch<T>(&self, tx_id: &str, mapper: &str, method: &str, arg: &serde_json::Value) -> Result<T, rbatis_core::Error>
-        where T: DeserializeOwned {
-        let (sql, args) = self.xml_to_sql(mapper, method, arg)?;
+    pub async fn xml_fetch<T, Ser>(&self, tx_id: &str, mapper: &str, method: &str, arg: &Ser) -> Result<T, rbatis_core::Error>
+        where T: DeserializeOwned, Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.xml_to_sql(mapper, method, &json)?;
         return self.fetch_prepare(tx_id, sql.as_str(), &args).await;
     }
 
     /// exec sql(prepare sql)
-    pub async fn xml_exec(&self, tx_id: &str, mapper: &str, method: &str, arg: &serde_json::Value) -> Result<u64, rbatis_core::Error> {
-        let (sql, args) = self.xml_to_sql(mapper, method, arg)?;
+    pub async fn xml_exec<Ser>(&self, tx_id: &str, mapper: &str, method: &str, arg: &Ser) -> Result<DBExecResult, rbatis_core::Error>
+        where Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.xml_to_sql(mapper, method, &json)?;
         return self.exec_prepare(tx_id, sql.as_str(), &args).await;
     }
 
@@ -346,9 +372,11 @@ impl Rbatis {
     ///       )"#;
     ///         let data: serde_json::Value = rb.py_fetch("", py, &json!({   "delete_flag": 1 })).await.unwrap();
     ///
-    pub async fn py_fetch<T>(&self, tx_id: &str, py: &str, arg: &serde_json::Value) -> Result<T, rbatis_core::Error>
-        where T: DeserializeOwned {
-        let (sql, args) = self.py_to_sql(py, arg)?;
+    pub async fn py_fetch<T, Ser>(&self, tx_id: &str, py: &str, arg: &Ser) -> Result<T, rbatis_core::Error>
+        where T: DeserializeOwned,
+              Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.py_to_sql(py, &json)?;
         return self.fetch_prepare(tx_id, sql.as_str(), &args).await;
     }
 
@@ -368,17 +396,19 @@ impl Rbatis {
     ///       )"#;
     ///         let data: u64 = rb.py_exec("", py, &json!({   "delete_flag": 1 })).await.unwrap();
     ///
-    pub async fn py_exec(&self, tx_id: &str, py: &str, arg: &serde_json::Value) -> Result<u64, rbatis_core::Error> {
-        let (sql, args) = self.py_to_sql(py, arg)?;
+    pub async fn py_exec<Ser>(&self, tx_id: &str, py: &str, arg: &Ser) -> Result<DBExecResult, rbatis_core::Error>
+        where Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.py_to_sql(py, &json)?;
         return self.exec_prepare(tx_id, sql.as_str(), &args).await;
     }
 
     /// fetch page result(prepare sql)
-    pub async fn fetch_page<T>(&self, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>, page: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
+    pub async fn fetch_page<T>(&self, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>, page_request: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
         where T: DeserializeOwned + Serialize + Send + Sync {
-        let mut page_result = Page::new(page.get_current(), page.get_size());
-        let (count_sql, sql) = self.page_plugin.create_page_sql(&self.driver_type()?, tx_id, sql, args, page)?;
-        if page.is_serch_count() {
+        let mut page_result = Page::new(page_request.get_current(), page_request.get_size());
+        let (count_sql, sql) = self.page_plugin.make_page_sql(&self.driver_type()?, tx_id, sql, args, page_request)?;
+        if page_request.is_serch_count() {
             //make count sql
             let total: Option<u64> = self.fetch_prepare(tx_id, count_sql.as_str(), args).await?;
             page_result.set_total(total.unwrap_or(0));
@@ -395,16 +425,19 @@ impl Rbatis {
 
 
     /// fetch result(prepare sql)
-    pub async fn xml_fetch_page<T>(&self, tx_id: &str, mapper: &str, method: &str, arg: &serde_json::Value, page: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
-        where T: DeserializeOwned + Serialize + Send + Sync {
-        let (sql, args) = self.xml_to_sql(mapper, method, arg)?;
+    pub async fn xml_fetch_page<T, Ser>(&self, tx_id: &str, mapper: &str, method: &str, arg: &Ser, page: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
+        where T: DeserializeOwned + Serialize + Send + Sync, Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.xml_to_sql(mapper, method, &json)?;
         return self.fetch_page::<T>(tx_id, sql.as_str(), &args, page).await;
     }
 
     /// fetch result(prepare sql)
-    pub async fn py_fetch_page<T>(&self, tx_id: &str, py: &str, arg: &serde_json::Value, page: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
-        where T: DeserializeOwned + Serialize + Send + Sync {
-        let (sql, args) = self.py_to_sql(py, arg)?;
+    pub async fn py_fetch_page<T, Ser>(&self, tx_id: &str, py: &str, arg: &Ser, page: &dyn IPageRequest) -> Result<Page<T>, rbatis_core::Error>
+        where T: DeserializeOwned + Serialize + Send + Sync,
+              Ser: Serialize + Send + Sync {
+        let json = serde_json::to_value(arg).unwrap_or(serde_json::Value::Null);
+        let (sql, args) = self.py_to_sql(py, &json)?;
         return self.fetch_page::<T>(tx_id, sql.as_str(), &args, page).await;
     }
 }

@@ -12,7 +12,23 @@ use crate::sql::PageLimit;
 ///default page plugin
 pub trait PagePlugin: Send + Sync {
     /// return 2 sql for select ,  (count_sql,select_sql)
-    fn create_page_sql(&self, driver_type: &DriverType, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>, page: &dyn IPageRequest) -> Result<(String, String), rbatis_core::Error>;
+    fn make_page_sql(&self, driver_type: &DriverType, tx_id: &str, sql: &str, args: &Vec<serde_json::Value>, page: &dyn IPageRequest) -> Result<(String, String), rbatis_core::Error>;
+
+    /// auto make count sql,also you can rewrite this method
+    fn make_count_sql(&self, sql: &str) -> String {
+        let sql: Vec<&str> = sql.split("FROM ").collect();
+        let mut where_sql = sql[1].clone().to_owned();
+        //remove order by
+        if where_sql.contains("ORDER BY "){
+            let where_sqls: Vec<&str> = where_sql.split("ORDER BY ").collect();
+            let mut new_sql=String::new();
+            for item in &where_sqls[0..where_sqls.len() - 1].to_vec() {
+                new_sql.push_str(item);
+            }
+            where_sql = new_sql;
+        }
+        format!("SELECT count(1) FROM {}", where_sql)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -20,23 +36,25 @@ pub struct RbatisPagePlugin {}
 
 
 impl PagePlugin for RbatisPagePlugin {
-    fn create_page_sql<>(&self, driver_type: &DriverType, tx_id: &str, sql: &str, args: &Vec<Value>, page: &dyn IPageRequest) -> Result<(String, String), rbatis_core::Error> {
+    fn make_page_sql<>(&self, driver_type: &DriverType, tx_id: &str, sql: &str, args: &Vec<Value>, page: &dyn IPageRequest) -> Result<(String, String), rbatis_core::Error> {
+        //default sql
         let mut sql = sql.to_owned();
         sql = sql.replace("select ", "SELECT ");
         sql = sql.replace("from ", "FROM ");
+        sql = sql.replace("order by ", "ORDER BY ");
         sql = sql.trim().to_string();
-        let mut count_sql = sql.clone();
-        if page.is_serch_count() {
-            //make count sql
-            let sql_vec: Vec<&str> = count_sql.split("FROM ").collect();
-            count_sql = "SELECT count(1) FROM ".to_string() + sql_vec[1];
-        }
-        let limit_sql = driver_type.page_limit_sql(page.offset(), page.get_size())?;
-        sql = sql + limit_sql.as_str();
         if !sql.starts_with("SELECT ") && !sql.contains("FROM ") {
             return Err(rbatis_core::Error::from("[rbatis] xml_fetch_page() sql must contains 'select ' And 'from '"));
         }
-        return Ok((count_sql, sql));
+        //count sql
+        let mut count_sql = sql.clone();
+        if page.is_serch_count() {
+            //make count sql
+            count_sql = self.make_count_sql(&count_sql);
+        }
+        //limit sql
+        let limit_sql = driver_type.page_limit_sql(page.offset(), page.get_size())?;
+        return Ok((count_sql, sql + limit_sql.as_str()));
     }
 }
 
@@ -292,7 +310,7 @@ impl<T> ToString for Page<T> where T: Send + Sync + Serialize {
     }
 }
 
-
+#[cfg(test)]
 mod test {
     use crate::plugin::page::{IPage, IPageRequest, Page};
 

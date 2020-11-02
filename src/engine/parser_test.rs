@@ -17,7 +17,8 @@ use crate::utils::time_util;
 
 #[test]
 fn test_parser() {
-    let box_node = parser::parse("a == 1 && a != 0", &OptMap::new()).unwrap();
+    let box_node = parser::parse("-1 == -a", &OptMap::new()).unwrap();
+    println!("{:#?}", &box_node);
     let john = json!({
         "a":1,
         "name": "John Doe",
@@ -43,7 +44,7 @@ fn test_benchmark() {
         "name": "John Doe",
     });
     let total = 10000000;
-    let now = SystemTime::now();
+    let now = std::time::Instant::now();
     for _ in 0..total {
         for _ in 0..1 {
             box_node.clone();

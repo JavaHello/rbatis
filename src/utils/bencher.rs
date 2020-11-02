@@ -1,46 +1,80 @@
-use chrono::{DateTime, Local};
-
-use crate::utils::time_util::print_each_time;
+use std::time::SystemTime;
 
 pub struct Bencher {
-    total: i32,
-    now: i64,
+    total: u64,
+    now: SystemTime,
 }
 
 impl Bencher {
-    pub fn new(total: i32) -> Self {
+    pub fn new(total: u64) -> Self {
         return Self {
             total,
-            now: 0,
+            now: SystemTime::now(),
         };
     }
 
-    pub fn iter(&mut self, func: fn()) {
+    pub fn iter<T, F>(&mut self, func: F) where F: Fn() {
         let mut current = 0;
-        self.now = Local::now().timestamp_millis();
+        self.now = SystemTime::now();
         loop {
             func();
             if current == self.total - 1 {
-                let end = Local::now().timestamp_millis();
-                use_time(self.total, self.now, end);
-                use_tps(self.total, self.now, end);
+                let end = SystemTime::now();
+                Self::time(self.total, self.now, end);
+                Self::qps(self.total, self.now, end);
                 break;
             } else {
                 current = current + 1;
             }
         }
     }
+
+    pub fn iter_ref<T, F>(&mut self, arg: &T, func: F) where F: Fn(&T) {
+        let mut current = 0;
+        self.now = SystemTime::now();
+        loop {
+            func(arg);
+            if current == self.total - 1 {
+                let end = SystemTime::now();
+                Self::time(self.total, self.now, end);
+                Self::qps(self.total, self.now, end);
+                break;
+            } else {
+                current = current + 1;
+            }
+        }
+    }
+
+    pub fn iter_mut<T, F>(&mut self, arg: &mut T, func: F) where F: Fn(&mut T) {
+        let mut current = 0;
+        self.now = SystemTime::now();
+        loop {
+            func(arg);
+            if current == self.total - 1 {
+                let end = SystemTime::now();
+                Self::time(self.total, self.now, end);
+                Self::qps(self.total, self.now, end);
+                break;
+            } else {
+                current = current + 1;
+            }
+        }
+    }
+
+    pub fn qps(total: u64, start: SystemTime, end: SystemTime) {
+        let time = end.duration_since(start).unwrap();
+        println!("use TPS: {} QPS/s", (total as u128 * 1000000000 as u128 / time.as_nanos() as u128));
+    }
+
+    //计算每个操作耗时nano纳秒
+    pub fn time(total: u64, start: SystemTime, end: SystemTime) {
+        let t = end.duration_since(start).unwrap();
+        println!("use Time: {:?} ,each:{} ns/op", &t, t.as_nanos() / (total as u128));
+    }
+
+    pub fn cost(method: &str, start: SystemTime) {
+        println!("cost_{}:{:?}", method, SystemTime::now().duration_since(start).unwrap());
+    }
 }
 
-fn use_tps(total: i32, start: i64, end: i64) {
-    let mut time = (end - start) as f64;
-    time = time / 1000.0;
-    println!("use TPS: {} TPS/s", total as f64 / time);
-}
 
-//计算每个操作耗时nano纳秒
-fn use_time(total: i32, start: i64, end: i64) {
-    let mut time = (end - start) as f64;
-    time = time / 1000.0;
-    println!("use Time: {} s,each:{} nano/op", time, time * 1000000000.0 / (total as f64));
-}
